@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more contributor license
+  agreements. See the NOTICE file distributed with this work for additional information regarding
+  copyright ownership. The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with the License. You may obtain
+  a copy of the License at https://www.apache.org/licenses/LICENSE-2.0 Unless required by applicable
+  law or agreed to in writing, software distributed under the License is distributed on an "AS IS"
+  BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+  for the specific language governing permissions and limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.forwardmeasure.platform</groupId>
+    <artifactId>forwardmeasure-platform</artifactId>
+    <version>1.1.0</version>
+    <relativePath>../forwardmeasure-platform/pom.xml</relativePath>
+  </parent>
+
+  <groupId>com.forwardmeasure.authzen</groupId>
+  <artifactId>forwardmeasure-authzen-parent</artifactId>
+  <version>${revision}</version>
+
+  <packaging>pom</packaging>
+  <name>ForwardMeasure AuthZEN</name>
+  <description>
+    Shared, product-neutral AuthZEN authorization contract and Keycloak AuthZEN PDP client -
+    extracted 2026-09-14 from forwardmeasure-openworkflow's own real openworkflow-authorization-*
+    modules (the origin), once forwardmeasure-entity-intelligence's own verbatim port of that same
+    code and forwardmeasure-data-streaming's own about-to-be-third-copy made clear this was
+    accumulated duplication, not a deliberate per-product design. Every product keeps its own
+    AuthorizationAction/AuthorizationResource domain vocabulary locally (genuinely product-specific);
+    only the generic transport layer - AuthorizationService/AuthorizationRequest/
+    AuthorizationDecision, the real Keycloak AuthZEN HTTP client, JWT-claims extraction, and the
+    test stub - lives here.
+  </description>
+
+  <url>https://github.com/forwardmeasure/forwardmeasure-authzen</url>
+
+  <scm>
+    <connection>scm:git:https://github.com/forwardmeasure/forwardmeasure-authzen.git</connection>
+    <developerConnection>scm:git:git@github.com:forwardmeasure/forwardmeasure-authzen.git</developerConnection>
+    <url>https://github.com/forwardmeasure/forwardmeasure-authzen</url>
+    <tag>HEAD</tag>
+  </scm>
+
+  <issueManagement>
+    <system>GitHub</system>
+    <url>https://github.com/forwardmeasure/forwardmeasure-authzen/issues</url>
+  </issueManagement>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <properties>
+    <revision>1.0.0</revision>
+    <!-- forwardmeasure.jpa.version is not redeclared here - already a real, inherited property
+         from our own parent, forwardmeasure-platform (confirmed by reading that pom directly, not
+         assumed after redeclaring it here was flagged as pointless duplication). -->
+  </properties>
+
+  <modules>
+    <module>forwardmeasure-authzen-api</module>
+    <module>forwardmeasure-authzen-client</module>
+    <module>forwardmeasure-authzen-testkit</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- forwardmeasure-jpa-tenancy (ActiveOrganization's own TenantId) has no version managed
+           by forwardmeasure-platform, unlike this repo's own artifacts below - real BOM import,
+           mirroring forwardmeasure-openworkflow's own root pom exactly (confirmed by reading it,
+           not guessed): a first build attempt without this failed with a real Maven
+           "dependencies.dependency.version ... is missing" error, the same lesson
+           forwardmeasure-data-streaming's own root pom comment already recorded for this exact
+           dependency. -->
+      <dependency>
+        <groupId>com.forwardmeasure.jpa</groupId>
+        <artifactId>forwardmeasure-jpa-bom</artifactId>
+        <version>${forwardmeasure.jpa.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <!-- forwardmeasure-testcontainers-keycloak backs forwardmeasure-authzen-testkit's own real
+           Keycloak+AuthZEN integration fixture (added once "no real integration tests" was
+           rightly rejected as a blocker to integrating this library anywhere) - same
+           dependency-management gap/fix pattern as forwardmeasure-jpa-bom above. -->
+      <dependency>
+        <groupId>com.forwardmeasure.testcontainers</groupId>
+        <artifactId>forwardmeasure-testcontainers-bom</artifactId>
+        <version>${forwardmeasure.testcontainers.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-authzen-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-authzen-client</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-authzen-testkit</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-clean-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <configuration>
+            <release>${maven.compiler.release}</release>
+            <parameters>true</parameters>
+            <showWarnings>true</showWarnings>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <configuration>
+            <useModulePath>false</useModulePath>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <configuration>
+            <useModulePath>false</useModulePath>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-install-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-deploy-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-site-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-source-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-javadoc-plugin</artifactId>
+          <configuration>
+            <doclint>all,-missing</doclint>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-enforcer-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>flatten-maven-plugin</artifactId>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals>
+              <goal>jar-no-fork</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
+        <configuration>
+          <flattenMode>ossrh</flattenMode>
+          <updatePomFile>true</updatePomFile>
+        </configuration>
+        <executions>
+          <execution>
+            <id>flatten</id>
+            <phase>process-resources</phase>
+            <goals>
+              <goal>flatten</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>flatten-clean</id>
+            <phase>clean</phase>
+            <goals>
+              <goal>clean</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

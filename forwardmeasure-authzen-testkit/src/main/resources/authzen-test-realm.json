@@ -1,0 +1,97 @@
+{
+  "realm": "authzen-test",
+  "enabled": true,
+  "sslRequired": "none",
+  "organizationsEnabled": true,
+  "clients": [
+    {
+      "clientId": "authzen-test-client",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "defaultClientScopes": ["organization"]
+    },
+    {
+      "clientId": "authzen-test-service",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "authzen-test-secret",
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "organization",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "sub",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "organization",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-organization-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "organization",
+            "jsonType.label": "JSON",
+            "multivalued": "true",
+            "addOrganizationAttributes": "true",
+            "addOrganizationId": "true"
+          }
+        },
+        {
+          "name": "organization-group-membership",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-organization-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "organization",
+            "addGroupRoleMappings": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "authzen-test-user",
+      "enabled": true,
+      "email": "authzen-test-user@authzen-test.example.com",
+      "emailVerified": true,
+      "firstName": "AuthZEN",
+      "lastName": "Test User",
+      "requiredActions": [],
+      "credentials": [
+        { "type": "password", "value": "authzen-test-password", "temporary": false }
+      ]
+    }
+  ]
+}
