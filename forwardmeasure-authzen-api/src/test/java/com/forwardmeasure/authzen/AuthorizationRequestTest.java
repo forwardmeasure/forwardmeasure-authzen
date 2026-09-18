@@ -19,6 +19,7 @@ package com.forwardmeasure.authzen;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +38,7 @@ class AuthorizationRequestTest {
   private static final ActiveOrganization ACTOR =
       new ActiveOrganization(
           new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
+          TenantDatabase.forAlias("authorizationrequesttest"),
           "org-1",
           "actor-1",
           Set.of("reviewer"));

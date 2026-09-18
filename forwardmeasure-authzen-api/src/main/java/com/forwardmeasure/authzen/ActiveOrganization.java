@@ -16,18 +16,28 @@
  */
 package com.forwardmeasure.authzen;
 
+import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import java.util.Objects;
 import java.util.Set;
 
 /**
  * Trusted identity extracted from one explicitly active Keycloak Organization. Ported verbatim from
- * forwardmeasure-openworkflow's real {@code ActiveOrganization}.
+ * forwardmeasure-openworkflow's real {@code ActiveOrganization}, then extended with {@link
+ * #tenantDatabase()} - the Organization's own alias (the JWT {@code organization} claim's map key)
+ * is already available at extraction time (see {@code KeycloakOrganizationClaims#extract}), so
+ * request-scoped call sites can resolve {@code TenantScope}'s real routing target directly, with no
+ * separate registry lookup.
  */
 public record ActiveOrganization(
-    TenantId tenantId, String organizationId, String actorId, Set<String> organizationRoles) {
+    TenantId tenantId,
+    TenantDatabase tenantDatabase,
+    String organizationId,
+    String actorId,
+    Set<String> organizationRoles) {
   public ActiveOrganization {
     Objects.requireNonNull(tenantId, "tenantId");
+    Objects.requireNonNull(tenantDatabase, "tenantDatabase");
     organizationId = requireText(organizationId, "organizationId");
     actorId = requireText(actorId, "actorId");
     organizationRoles = Set.copyOf(Objects.requireNonNull(organizationRoles, "organizationRoles"));

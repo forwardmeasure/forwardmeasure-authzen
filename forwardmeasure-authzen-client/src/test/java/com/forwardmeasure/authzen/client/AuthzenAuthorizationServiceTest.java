@@ -28,6 +28,7 @@ import com.forwardmeasure.authzen.ActiveOrganization;
 import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationResource;
 import com.forwardmeasure.authzen.AuthorizationUnavailableException;
+import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -155,6 +156,7 @@ class AuthzenAuthorizationServiceTest {
     return new AuthorizationRequest(
         new ActiveOrganization(
             new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
+            TenantDatabase.forAlias("authzenauthorizationservicetest"),
             organizationId,
             "11111111-1111-1111-1111-111111111111",
             roles),

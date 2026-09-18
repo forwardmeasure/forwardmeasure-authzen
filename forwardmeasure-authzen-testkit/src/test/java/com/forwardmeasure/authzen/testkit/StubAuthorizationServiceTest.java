@@ -25,6 +25,7 @@ import com.forwardmeasure.authzen.ActiveOrganization;
 import com.forwardmeasure.authzen.AuthorizationDeniedException;
 import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationResource;
+import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import java.util.Map;
 import java.util.Set;
@@ -51,7 +52,11 @@ class StubAuthorizationServiceTest {
   private static final AuthorizationRequest REQUEST =
       new AuthorizationRequest(
           new ActiveOrganization(
-              new TenantId(UUID.randomUUID()), "org-1", "actor-1", Set.of("reviewer")),
+              new TenantId(UUID.randomUUID()),
+              TenantDatabase.forAlias("stubauthorizationservicetest"),
+              "org-1",
+              "actor-1",
+              Set.of("reviewer")),
           new AuthorizationResource("widget", "widgets", Map.of()),
           TestAction.READ,
           "correlation-1",

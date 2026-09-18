@@ -59,12 +59,13 @@ public final class KeycloakOrganizationClaims {
     try {
       return new ActiveOrganization(
           com.forwardmeasure.jpa.tenancy.TenantId.parse(tenantId),
+          com.forwardmeasure.jpa.tenancy.TenantDatabase.forAlias(alias),
           organizationId,
           actorId,
           organizationRoles);
     } catch (IllegalArgumentException failure) {
       throw new AuthenticationRequiredException(
-          "Active Organization tenant id must be a UUID", failure);
+          "Active Organization tenant id or alias is invalid", failure);
     }
   }
 

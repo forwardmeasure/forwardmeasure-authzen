@@ -13,6 +13,7 @@ package com.forwardmeasure.authzen;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,7 @@ class KeycloakOrganizationClaimsTest {
 
     assertEquals(ORGANIZATION_ID, active.organizationId());
     assertEquals(ID, active.tenantId().toString());
+    assertEquals(TenantDatabase.forAlias("tenant-a"), active.tenantDatabase());
     assertEquals(Set.of("some-role"), active.organizationRoles());
   }
 
