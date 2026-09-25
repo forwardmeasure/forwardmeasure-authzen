@@ -22,7 +22,8 @@
       "serviceAccountsEnabled": true,
       "authorizationServicesEnabled": true,
       "standardFlowEnabled": false,
-      "directAccessGrantsEnabled": false
+      "directAccessGrantsEnabled": false,
+      "defaultClientScopes": ["organization"]
     }
   ],
   "clientScopes": [

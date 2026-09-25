@@ -75,12 +75,20 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
   private static final String REALM_RESOURCE = "/authzen-test-realm.json";
   private static final Pattern ACCESS_TOKEN =
       Pattern.compile("\"access_token\"\\s*:\\s*\"([^\"]+)\"");
+  private static final Pattern EXPIRES_IN = Pattern.compile("\"expires_in\"\\s*:\\s*(\\d+)");
+  // Real, confirmed live 2026-09-23: this fixture's own cached admin token had no expiry tracking
+  // at all - a real, later call (this fixture is used by fixtures that boot several minutes' worth
+  // of other real services, e.g. RealFowfWorkflowFixture, before ever needing a second admin call)
+  // hit Keycloak's own default master-realm access-token TTL, producing a plain 401 on an otherwise
+  // correct request. Refresh a safety margin before the real expiry, not exactly at it.
+  private static final Duration TOKEN_REFRESH_SAFETY_MARGIN = Duration.ofSeconds(15);
 
   private final KeycloakTestContainer container;
   private final HttpClient http =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
   private final ObjectMapper mapper = new ObjectMapper();
   private volatile String adminToken;
+  private volatile long adminTokenExpiresAtNanos;
   private volatile String clientUuid;
   private volatile String authzenClientUuid;
 
@@ -120,6 +128,69 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
   }
 
   /**
+   * Adds {@value #AUTHZEN_CLIENT_ID}'s own real Keycloak service-account user (confidential clients
+   * with {@code serviceAccountsEnabled: true}, which this fixture's own realm already declares for
+   * that client, each get one) to {@code organizationId}'s Organization and the given role's own
+   * Group - mirrors {@link #provisionTenant}'s identical member/group-membership calls, resolving a
+   * different identity's own Keycloak user id instead of {@link #USERNAME}'s.
+   *
+   * <p>Real reason this exists, not a hypothetical: {@code
+   * WorkflowGovernanceServiceImpl#publishWorkflowDefinition} unconditionally requires the actor who
+   * publishes a definition to be a genuinely different identity than whoever authored it (a real
+   * maker-checker rule, confirmed by direct source read) - {@link #mintUserToken()} only ever mints
+   * for the one fixed {@link #USERNAME}, so a caller proving that governance flow for real needs a
+   * second, independently-authenticatable identity in the same Organization. Mirrors
+   * forwardmeasure-entity-intelligence's own real, already-proven {@code
+   * WorkflowDefinitionPublisherMain}, which authenticates its own "author" and "reviewer" calls as
+   * two distinct client-credentials identities for exactly this reason.
+   *
+   * @return the client-credentials bearer token for {@value #AUTHZEN_CLIENT_ID}'s own
+   *     service-account user, now provisioned as a real member of {@code organizationId} holding
+   *     {@code roleName} - ready to use as a genuinely different actor from {@link
+   *     #mintUserToken()}.
+   */
+  public String provisionServiceAccountReviewer(String organizationId, String roleName) {
+    // Requires provisionTenant to have already been called for (organizationId, roleName) - this
+    // method only adds a second member to the group/role-mapping that call already created, it
+    // does not create either from scratch (findOrganizationGroupId throws if that group is
+    // missing).
+    String groupId = findOrganizationGroupId(organizationId, roleName);
+    String serviceAccountUserId = serviceAccountUserId();
+    send(
+        "POST",
+        adminBase().resolve("organizations/" + organizationId + "/members"),
+        serviceAccountUserId,
+        201,
+        204,
+        409);
+    send(
+        "PUT",
+        adminBase()
+            .resolve(
+                "organizations/"
+                    + organizationId
+                    + "/groups/"
+                    + groupId
+                    + "/members/"
+                    + serviceAccountUserId),
+        null,
+        204,
+        409);
+    return container.clientCredentialsToken(AUTHZEN_CLIENT_ID, AUTHZEN_CLIENT_SECRET);
+  }
+
+  private String serviceAccountUserId() {
+    return requiredText(
+        send(
+                "GET",
+                adminBase().resolve("clients/" + authzenClientUuid() + "/service-account-user"),
+                null,
+                200)
+            .body(),
+        "id");
+  }
+
+  /**
    * Provisions everything a real Keycloak 26.7 AuthZEN evaluation needs to permit {@code
    * roleName}-holding actors to perform each of {@code actionScopes} against one resource
    * identified by {@code (resourceType, resourceId)} - a genuinely generic version of the origin
@@ -129,32 +200,137 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
    * Services resources/scopes/policies/permissions are realm/client-scoped, not
    * Organization-scoped).
    *
-   * <p>Everything here lives on {@value #AUTHZEN_CLIENT_ID} (a confidential, service-account,
-   * {@code authorizationServicesEnabled} client - the resource server the real AuthZEN evaluation
-   * endpoint resolves via the calling access token's {@code azp}), while the role itself continues
-   * to live on {@value #CLIENT_ID} (mirroring a real deployment's own separation between the
-   * actor-facing OIDC client and the service's own outbound AuthZEN identity). Keycloak
-   * Authorization Services role policies reference roles by their own realm-wide UUID (not a
-   * composite client-id/role-name string), so this looks that UUID up via the same {@code GET
-   * .../clients/{id}/roles/{roleName}} call {@link #ensureClientRole(String)} already uses.
+   * <p>{@code organizationId} must be the value {@link #provisionTenant} returned for a call with
+   * this same {@code roleName} - this method maps the role onto that Organization's own Group
+   * (already created by {@code provisionTenant}) rather than assuming any particular call order, so
+   * {@code provisionTenant} must run first.
+   *
+   * <p>Uses the {@code organization-role} custom Keycloak Policy Provider (see {@code
+   * OrganizationRolePolicyProvider} in {@code helm-charts/charts/keycloak-helm-chart/
+   * policy-provider}), not a native Role or Group policy - confirmed live that neither native
+   * policy type can recognize a role granted only via Organization-Group membership (Keycloak's own
+   * admin API explicitly rejects a Group-type policy referencing an Organization group; a Role-type
+   * policy only ever sees a role granted directly to the identity, Organization membership or not).
+   * {@code roleName} is therefore never granted directly to the test user or the AuthZEN service
+   * account here - a direct grant would satisfy a native Role policy regardless of Organization
+   * membership, silently masking the exact gap this fixture exists to catch. The role instead lives
+   * on {@value #AUTHZEN_CLIENT_ID} (the AuthZEN evaluation's real resource-server client - {@code
+   * OrganizationRolePolicyProvider} resolves the role via {@code resourceServer.getClientId()}, not
+   * {@value #CLIENT_ID}) and is mapped onto {@code organizationId}'s own Organization Group of the
+   * same name - the real path {@code OrganizationRolePolicyProvider} walks via {@code
+   * OrganizationProvider .getOrganizationGroupsByMember}.
    */
   public void grantResourceAuthorization(
+      String organizationId,
       String resourceType,
       String resourceId,
       String permissionName,
       String roleName,
       Set<String> actionScopes) {
-    ensureClientRole(roleName);
-    JsonNode role = ensureRealmRole(roleName);
-    String roleUuid = requiredText(role, "id");
-    grantRoleToAuthzenServiceAccount(role);
-    grantRoleToTestUser(role);
+    ensureAuthzenClientRole(roleName);
+    mapAuthzenRoleOntoOrganizationGroup(organizationId, roleName);
     for (String scope : actionScopes) {
       ensureAuthzenScope(scope);
     }
     String keycloakResourceId = ensureResource(resourceType, resourceId, actionScopes);
-    String policyId = ensureRolePolicy(roleName, roleUuid);
+    String policyId = ensureOrganizationRolePolicy(roleName);
     ensureScopePermission(permissionName, keycloakResourceId, actionScopes, policyId);
+  }
+
+  private void ensureAuthzenClientRole(String roleName) {
+    Response existing =
+        send(
+            "GET",
+            adminBase().resolve("clients/" + authzenClientUuid() + "/roles/" + roleName),
+            null,
+            200,
+            404);
+    if (existing.status() == 404) {
+      send(
+          "POST",
+          adminBase().resolve("clients/" + authzenClientUuid() + "/roles"),
+          Map.of("name", roleName),
+          201,
+          204,
+          409);
+    }
+  }
+
+  private void mapAuthzenRoleOntoOrganizationGroup(String organizationId, String roleName) {
+    String groupId = findOrganizationGroupId(organizationId, roleName);
+    JsonNode role =
+        send(
+                "GET",
+                adminBase().resolve("clients/" + authzenClientUuid() + "/roles/" + roleName),
+                null,
+                200)
+            .body();
+    send(
+        "POST",
+        adminBase()
+            .resolve(
+                "organizations/"
+                    + organizationId
+                    + "/groups/"
+                    + groupId
+                    + "/role-mappings/clients/"
+                    + authzenClientUuid()),
+        List.of(role),
+        201,
+        204,
+        409);
+  }
+
+  private String findOrganizationGroupId(String organizationId, String groupName) {
+    JsonNode groups =
+        send("GET", adminBase().resolve("organizations/" + organizationId + "/groups"), null, 200)
+            .body();
+    for (JsonNode group : groups) {
+      if (groupName.equals(group.path("name").asText())) {
+        return requiredText(group, "id");
+      }
+    }
+    throw new IllegalStateException(
+        "Organization "
+            + organizationId
+            + " has no group named "
+            + groupName
+            + " - call provisionTenant with a matching roleName before grantResourceAuthorization");
+  }
+
+  private String ensureOrganizationRolePolicy(String roleName) {
+    String policyName = "authzen-test-" + roleName + "-organization-role-policy";
+    send(
+        "POST",
+        adminBase()
+            .resolve(
+                "clients/"
+                    + authzenClientUuid()
+                    + "/authz/resource-server/policy/organization-role"),
+        Map.of("name", policyName, "logic", "POSITIVE", "config", Map.of("role", roleName)),
+        201,
+        204,
+        409);
+    JsonNode policies =
+        send(
+                "GET",
+                URI.create(
+                    adminBase()
+                            .resolve(
+                                "clients/" + authzenClientUuid() + "/authz/resource-server/policy")
+                            .toString()
+                        + "?name="
+                        + URLEncoder.encode(policyName, StandardCharsets.UTF_8)),
+                null,
+                200)
+            .body();
+    for (JsonNode policy : policies) {
+      if (policyName.equals(policy.path("name").asText())) {
+        return requiredText(policy, "id");
+      }
+    }
+    throw new IllegalStateException(
+        "Keycloak did not return the created organization-role policy " + policyName);
   }
 
   private void ensureAuthzenScope(String scopeName) {
@@ -224,44 +400,6 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
     throw new IllegalStateException("Keycloak did not return the created resource " + resourceId);
   }
 
-  private String ensureRolePolicy(String roleName, String roleUuid) {
-    String policyName = "authzen-test-" + roleName + "-policy";
-    send(
-        "POST",
-        adminBase()
-            .resolve("clients/" + authzenClientUuid() + "/authz/resource-server/policy/role"),
-        Map.of(
-            "name",
-            policyName,
-            "logic",
-            "POSITIVE",
-            "roles",
-            List.of(Map.of("id", roleUuid, "required", false))),
-        201,
-        204,
-        409);
-    JsonNode policies =
-        send(
-                "GET",
-                URI.create(
-                    adminBase()
-                            .resolve(
-                                "clients/" + authzenClientUuid() + "/authz/resource-server/policy")
-                            .toString()
-                        + "?name="
-                        + URLEncoder.encode(policyName, StandardCharsets.UTF_8)),
-                null,
-                200)
-            .body();
-    for (JsonNode policy : policies) {
-      if (policyName.equals(policy.path("name").asText())) {
-        return requiredText(policy, "id");
-      }
-    }
-    throw new IllegalStateException(
-        "Keycloak did not return the created role policy " + policyName);
-  }
-
   private void ensureScopePermission(
       String permissionName, String resourceId, Set<String> actionScopes, String policyId) {
     List<String> scopeIds = actionScopes.stream().map(this::authzenScopeId).toList();
@@ -307,42 +445,6 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
           204,
           409);
     }
-  }
-
-  private JsonNode ensureRealmRole(String roleName) {
-    Response existing = send("GET", adminBase().resolve("roles/" + roleName), null, 200, 404);
-    if (existing.status() == 404) {
-      send("POST", adminBase().resolve("roles"), Map.of("name", roleName), 201, 204, 409);
-      existing = send("GET", adminBase().resolve("roles/" + roleName), null, 200);
-    }
-    return existing.body();
-  }
-
-  private void grantRoleToAuthzenServiceAccount(JsonNode role) {
-    String serviceAccountId =
-        requiredText(
-            send(
-                    "GET",
-                    adminBase().resolve("clients/" + authzenClientUuid() + "/service-account-user"),
-                    null,
-                    200)
-                .body(),
-            "id");
-    send(
-        "POST",
-        adminBase().resolve("users/" + serviceAccountId + "/role-mappings/realm"),
-        List.of(role),
-        204,
-        409);
-  }
-
-  private void grantRoleToTestUser(JsonNode role) {
-    send(
-        "POST",
-        adminBase().resolve("users/" + requireUserId() + "/role-mappings/realm"),
-        List.of(role),
-        204,
-        409);
   }
 
   private String createOrganization(String alias, UUID tenantId) {
@@ -519,7 +621,7 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
 
   private String adminBearerToken() {
     String resolved = adminToken;
-    if (resolved != null) {
+    if (resolved != null && System.nanoTime() < adminTokenExpiresAtNanos) {
       return resolved;
     }
     try {
@@ -544,6 +646,16 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
         throw new IllegalStateException("Keycloak admin token response has no access_token");
       }
       resolved = matcher.group(1);
+      Matcher expiresMatcher = EXPIRES_IN.matcher(response.body());
+      Duration ttl =
+          expiresMatcher.find()
+              ? Duration.ofSeconds(Long.parseLong(expiresMatcher.group(1)))
+              : Duration.ofSeconds(60);
+      Duration effectiveTtl =
+          ttl.compareTo(TOKEN_REFRESH_SAFETY_MARGIN) > 0
+              ? ttl.minus(TOKEN_REFRESH_SAFETY_MARGIN)
+              : ttl;
+      adminTokenExpiresAtNanos = System.nanoTime() + effectiveTtl.toNanos();
       adminToken = resolved;
       return resolved;
     } catch (InterruptedException interrupted) {

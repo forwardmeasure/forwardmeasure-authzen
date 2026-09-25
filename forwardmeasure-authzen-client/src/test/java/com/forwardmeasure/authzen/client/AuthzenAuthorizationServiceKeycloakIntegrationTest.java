@@ -89,10 +89,15 @@ class AuthzenAuthorizationServiceKeycloakIntegrationTest {
   @BeforeAll
   static void startKeycloakAndProvisionRealAuthorization() {
     fixture = AuthzenKeycloakFixture.start();
-    fixture.grantResourceAuthorization(
-        RESOURCE_TYPE, RESOURCE_ID, PERMISSION_NAME, ROLE, Set.of(GRANTED_SCOPE.scope()));
     UUID tenantId = UUID.randomUUID();
-    fixture.provisionTenant("widget-org", tenantId, ROLE);
+    String organizationId = fixture.provisionTenant("widget-org", tenantId, ROLE);
+    fixture.grantResourceAuthorization(
+        organizationId,
+        RESOURCE_TYPE,
+        RESOURCE_ID,
+        PERMISSION_NAME,
+        ROLE,
+        Set.of(GRANTED_SCOPE.scope()));
 
     String accessToken = fixture.mintUserToken();
     Map<String, Object> claims = decodeClaims(accessToken);

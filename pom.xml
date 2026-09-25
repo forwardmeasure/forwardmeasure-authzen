@@ -60,7 +60,7 @@
   </licenses>
 
   <properties>
-    <revision>1.0.0</revision>
+    <revision>1.1.0</revision>
     <!-- forwardmeasure.jpa.version is not redeclared here - already a real, inherited property
          from our own parent, forwardmeasure-platform (confirmed by reading that pom directly, not
          assumed after redeclaring it here was flagged as pointless duplication). -->
