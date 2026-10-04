@@ -36,6 +36,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.testcontainers.containers.Network;
 
 /**
  * A real, running Keycloak fixture with the Organizations feature genuinely wired for the {@code
@@ -101,8 +102,100 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
     return new AuthzenKeycloakFixture(container);
   }
 
+  /**
+   * Starts on {@code network} as {@code alias}, Keycloak's hostname pinned to the in-network URL -
+   * see {@link KeycloakTestContainer#KeycloakTestContainer(String, String, Network, String)}.
+   * Containerized services on that network use {@link #networkIssuer()}; this fixture's own admin
+   * and token calls keep using {@link #issuer()}.
+   */
+  public static AuthzenKeycloakFixture start(Network network, String alias) {
+    KeycloakTestContainer container =
+        new KeycloakTestContainer(REALM, realmJson(), network, alias).start();
+    return new AuthzenKeycloakFixture(container);
+  }
+
+  /** Host-reachable realm URL. */
   public URI issuer() {
     return container.issuer();
+  }
+
+  /** Every token's {@code iss} when started with {@link #start(Network, String)}. */
+  public URI networkIssuer() {
+    return container.networkIssuer();
+  }
+
+  /**
+   * Creates a confidential, service-account-only client - a distinct machine identity (e.g. a
+   * worker) with its own subject, separate from {@value #AUTHZEN_CLIENT_ID}. The realm grants no
+   * client scopes by default, so the {@code organization} scope is set explicitly: without it the
+   * client's tokens carry no {@code organization} claim. Idempotent.
+   */
+  public void createServiceAccountClient(String clientId, String clientSecret) {
+    send(
+        "POST",
+        adminBase().resolve("clients"),
+        Map.of(
+            "clientId",
+            clientId,
+            "secret",
+            clientSecret,
+            "protocol",
+            "openid-connect",
+            "publicClient",
+            false,
+            "standardFlowEnabled",
+            false,
+            "directAccessGrantsEnabled",
+            false,
+            "serviceAccountsEnabled",
+            true,
+            "clientAuthenticatorType",
+            "client-secret",
+            "defaultClientScopes",
+            List.of("organization")),
+        201,
+        409);
+  }
+
+  /**
+   * Makes {@code clientId}'s service-account user a member of {@code organizationId} and of that
+   * Organization's {@code roleName} group (created if missing) - so {@link
+   * #grantResourceAuthorization} with the same {@code roleName} grants that identity alone, not
+   * {@link #USERNAME}. Idempotent.
+   */
+  public void addServiceAccountToOrganization(
+      String organizationId, String clientId, String roleName) {
+    String groupId = createOrganizationGroup(organizationId, roleName);
+    String serviceAccountUserId =
+        requiredText(
+            send(
+                    "GET",
+                    adminBase()
+                        .resolve("clients/" + clientUuidOf(clientId) + "/service-account-user"),
+                    null,
+                    200)
+                .body(),
+            "id");
+    addOrganizationMember(organizationId, serviceAccountUserId);
+    addOrganizationGroupMember(organizationId, groupId, serviceAccountUserId);
+  }
+
+  /**
+   * Gives {@code organizationId}'s {@code roleName} group (created if missing) the {@value
+   * #CLIENT_ID} client role of the same name (created if missing) - so every member's organization
+   * claim lists it under {@code resource_access.}{@value #CLIENT_ID}{@code .roles}, which {@code
+   * KeycloakOrganizationClaims.extract} requires of every caller. A machine identity added with
+   * {@link #addServiceAccountToOrganization} needs this before a product accepts its tokens at all;
+   * the role carries no permission itself. Idempotent.
+   */
+  public void grantOrganizationClientRole(String organizationId, String roleName) {
+    ensureClientRole(roleName);
+    String groupId = createOrganizationGroup(organizationId, roleName);
+    mapRoleOntoOrganizationGroup(organizationId, groupId, roleName);
+  }
+
+  public String clientCredentialsToken(String clientId, String clientSecret) {
+    return container.clientCredentialsToken(clientId, clientSecret);
   }
 
   /**
@@ -604,6 +697,23 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
     }
     throw new IllegalStateException(
         "Keycloak client " + AUTHZEN_CLIENT_ID + " was not found - realm import may have failed");
+  }
+
+  private String clientUuidOf(String clientId) {
+    String query = URLEncoder.encode(clientId, StandardCharsets.UTF_8);
+    JsonNode clients =
+        send(
+                "GET",
+                URI.create(adminBase().resolve("clients").toString() + "?clientId=" + query),
+                null,
+                200)
+            .body();
+    for (JsonNode client : clients) {
+      if (clientId.equals(client.path("clientId").asText())) {
+        return requiredText(client, "id");
+      }
+    }
+    throw new IllegalStateException("Keycloak client " + clientId + " was not found");
   }
 
   private URI adminBase() {

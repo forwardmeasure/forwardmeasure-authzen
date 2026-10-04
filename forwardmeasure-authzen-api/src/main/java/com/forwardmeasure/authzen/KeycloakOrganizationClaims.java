@@ -46,16 +46,8 @@ public final class KeycloakOrganizationClaims {
       throw new AuthenticationRequiredException("Active Organization id is required");
     }
     String tenantId = singletonText(organization.get(TENANT_ID_ATTRIBUTE), TENANT_ID_ATTRIBUTE);
-    Map<?, ?> resources = map(organization.get("resource_access"), "Organization resource_access");
-    Map<?, ?> client = map(resources.get(clientId), "Organization client roles");
-    Object rolesValue = client.get("roles");
-    if (!(rolesValue instanceof Collection<?> roles)) {
-      throw new AuthenticationRequiredException("Active Organization client roles are required");
-    }
     Set<String> organizationRoles =
-        roles.stream()
-            .map(KeycloakOrganizationClaims::role)
-            .collect(Collectors.toUnmodifiableSet());
+        organizationRoles(organization.get("resource_access"), clientId);
     try {
       return new ActiveOrganization(
           com.forwardmeasure.jpa.tenancy.TenantId.parse(tenantId),
@@ -67,6 +59,29 @@ public final class KeycloakOrganizationClaims {
       throw new AuthenticationRequiredException(
           "Active Organization tenant id or alias is invalid", failure);
     }
+  }
+
+  /**
+   * The active Organization's roles for {@code clientId}. Keycloak omits the Organization's
+   * resource_access (or this client's entry) for a member who holds no role there; that member is
+   * authenticated with no roles, so authorization denies them (403) instead of authentication
+   * failing (401). A claim that is present but malformed is still rejected.
+   */
+  private static Set<String> organizationRoles(Object resourceAccess, String clientId) {
+    if (resourceAccess == null) {
+      return Set.of();
+    }
+    Object clientValue = map(resourceAccess, "Organization resource_access").get(clientId);
+    if (clientValue == null) {
+      return Set.of();
+    }
+    Object rolesValue = map(clientValue, "Organization client roles").get("roles");
+    if (!(rolesValue instanceof Collection<?> roles)) {
+      throw new AuthenticationRequiredException("Active Organization client roles are required");
+    }
+    return roles.stream()
+        .map(KeycloakOrganizationClaims::role)
+        .collect(Collectors.toUnmodifiableSet());
   }
 
   private static Map<?, ?> map(Object value, String name) {

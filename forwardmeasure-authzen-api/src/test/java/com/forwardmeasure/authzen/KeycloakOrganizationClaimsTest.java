@@ -67,6 +67,74 @@ class KeycloakOrganizationClaimsTest {
                 "my-client"));
   }
 
+  /**
+   * A member of the active Organization who holds no role there is authenticated with no roles, so
+   * authorization denies (403) rather than authentication failing (401). Keycloak omits the
+   * Organization's resource_access entirely for such a member.
+   */
+  @Test
+  void aMemberWithNoOrganizationRolesHasAnEmptyRoleSet() {
+    var noResourceAccess =
+        Map.<String, Object>of(
+            "sub", "actor-1",
+            "resource_access", Map.of("my-client", Map.of("roles", Set.of("leaked"))),
+            "organization",
+                Map.of(
+                    "tenant-a",
+                    Map.of("id", ORGANIZATION_ID, "forwardmeasure.tenant-id", Set.of(ID))));
+    var otherClientOnly =
+        Map.<String, Object>of(
+            "sub",
+            "actor-1",
+            "organization",
+            Map.of(
+                "tenant-a",
+                Map.of(
+                    "id",
+                    ORGANIZATION_ID,
+                    "forwardmeasure.tenant-id",
+                    Set.of(ID),
+                    "resource_access",
+                    Map.of("other-client", Map.of("roles", Set.of("other-role"))))));
+
+    assertEquals(
+        Set.of(),
+        KeycloakOrganizationClaims.extract(noResourceAccess, "my-client").organizationRoles());
+    assertEquals(
+        Set.of(),
+        KeycloakOrganizationClaims.extract(otherClientOnly, "my-client").organizationRoles());
+  }
+
+  @Test
+  void rejectsMalformedOrganizationRoleClaims() {
+    for (Object resourceAccess :
+        java.util.List.of(
+            "not-a-map",
+            Map.of("my-client", "not-a-map"),
+            Map.of("my-client", Map.of("roles", "not-a-collection")),
+            Map.of("my-client", Map.of()),
+            Map.of("my-client", Map.of("roles", java.util.List.of(" "))))) {
+      var claims =
+          Map.<String, Object>of(
+              "sub",
+              "actor-1",
+              "organization",
+              Map.of(
+                  "tenant-a",
+                  Map.of(
+                      "id",
+                      ORGANIZATION_ID,
+                      "forwardmeasure.tenant-id",
+                      Set.of(ID),
+                      "resource_access",
+                      resourceAccess)));
+      assertThrows(
+          AuthenticationRequiredException.class,
+          () -> KeycloakOrganizationClaims.extract(claims, "my-client"),
+          resourceAccess.toString());
+    }
+  }
+
   @Test
   void rejectsAMissingSubject() {
     assertThrows(
