@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.testcontainers.containers.Network;
@@ -199,15 +198,16 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
   }
 
   /**
-   * Provisions one Organization (with the {@code forwardmeasure.tenant-id} attribute {@code
+   * Provisions one Organization (with the {@code forwardmeasure.tenant-did} attribute {@code
    * KeycloakOrganizationClaims} reads), one client role on {@value #CLIENT_ID}, one Organization
    * Group mapping that role, and adds {@value #USERNAME} as a member of both the Organization and
    * the group. Uses the real, dedicated Organization Groups API ({@code
    * organizations/{orgId}/groups/...}), not a plain realm Group.
    */
-  public String provisionTenant(String organizationAlias, UUID tenantId, String roleName) {
+  public String provisionTenant(
+      String organizationAlias, com.forwardmeasure.jpa.tenancy.Did tenantDid, String roleName) {
     ensureClientRole(roleName);
-    String organizationId = createOrganization(organizationAlias, tenantId);
+    String organizationId = createOrganization(organizationAlias, tenantDid);
     String groupId = createOrganizationGroup(organizationId, roleName);
     mapRoleOntoOrganizationGroup(organizationId, groupId, roleName);
     String userId = requireUserId();
@@ -540,7 +540,7 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
     }
   }
 
-  private String createOrganization(String alias, UUID tenantId) {
+  private String createOrganization(String alias, com.forwardmeasure.jpa.tenancy.Did tenantDid) {
     Response created =
         send(
             "POST",
@@ -553,7 +553,7 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
                 "enabled",
                 true,
                 "attributes",
-                Map.of("forwardmeasure.tenant-id", List.of(tenantId.toString()))),
+                Map.of("forwardmeasure.tenant-did", List.of(tenantDid.value()))),
             201);
     return created
         .location()

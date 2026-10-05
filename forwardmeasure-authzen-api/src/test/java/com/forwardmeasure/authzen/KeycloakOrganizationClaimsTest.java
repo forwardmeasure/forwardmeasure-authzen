@@ -13,7 +13,6 @@ package com.forwardmeasure.authzen;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -24,7 +23,10 @@ import org.junit.jupiter.api.Test;
  * AuthenticationRequiredException}, not the origin's {@code SecurityException}.
  */
 class KeycloakOrganizationClaimsTest {
-  private static final String ID = "11111111-1111-1111-1111-111111111111";
+  private static final String DID = "did:web:tenant-a.example.test";
+  private static final String ID =
+      com.forwardmeasure.jpa.tenancy.TenantId.forDid(com.forwardmeasure.jpa.tenancy.Did.parse(DID))
+          .toString();
   private static final String ORGANIZATION_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
   @Test
@@ -39,8 +41,8 @@ class KeycloakOrganizationClaimsTest {
                     Map.of(
                         "id",
                         ORGANIZATION_ID,
-                        "forwardmeasure.tenant-id",
-                        Set.of(ID),
+                        "forwardmeasure.tenant-did",
+                        Set.of(DID),
                         "resource_access",
                         Map.of("my-client", Map.of("roles", Set.of("some-role"))))));
 
@@ -48,7 +50,6 @@ class KeycloakOrganizationClaimsTest {
 
     assertEquals(ORGANIZATION_ID, active.organizationId());
     assertEquals(ID, active.tenantId().toString());
-    assertEquals(TenantDatabase.forAlias("tenant-a"), active.tenantDatabase());
     assertEquals(Set.of("some-role"), active.organizationRoles());
   }
 
@@ -81,7 +82,7 @@ class KeycloakOrganizationClaimsTest {
             "organization",
                 Map.of(
                     "tenant-a",
-                    Map.of("id", ORGANIZATION_ID, "forwardmeasure.tenant-id", Set.of(ID))));
+                    Map.of("id", ORGANIZATION_ID, "forwardmeasure.tenant-did", Set.of(DID))));
     var otherClientOnly =
         Map.<String, Object>of(
             "sub",
@@ -92,8 +93,8 @@ class KeycloakOrganizationClaimsTest {
                 Map.of(
                     "id",
                     ORGANIZATION_ID,
-                    "forwardmeasure.tenant-id",
-                    Set.of(ID),
+                    "forwardmeasure.tenant-did",
+                    Set.of(DID),
                     "resource_access",
                     Map.of("other-client", Map.of("roles", Set.of("other-role"))))));
 
@@ -124,8 +125,8 @@ class KeycloakOrganizationClaimsTest {
                   Map.of(
                       "id",
                       ORGANIZATION_ID,
-                      "forwardmeasure.tenant-id",
-                      Set.of(ID),
+                      "forwardmeasure.tenant-did",
+                      Set.of(DID),
                       "resource_access",
                       resourceAccess)));
       assertThrows(
@@ -133,6 +134,28 @@ class KeycloakOrganizationClaimsTest {
           () -> KeycloakOrganizationClaims.extract(claims, "my-client"),
           resourceAccess.toString());
     }
+  }
+
+  @Test
+  void requiresTheOrganizationDidAndIgnoresAnIndependentlySuppliedId() {
+    var organization = new java.util.HashMap<String, Object>();
+    organization.put("id", ORGANIZATION_ID);
+    organization.put("forwardmeasure.tenant-id", java.util.UUID.randomUUID().toString());
+    var claims =
+        Map.<String, Object>of("sub", "actor", "organization", Map.of("alias", organization));
+    assertThrows(
+        AuthenticationRequiredException.class,
+        () -> KeycloakOrganizationClaims.extract(claims, "my-client"));
+    organization.put("forwardmeasure.tenant-did", DID);
+    assertEquals(ID, KeycloakOrganizationClaims.extract(claims, "my-client").tenantId().toString());
+    organization.put("forwardmeasure.tenant-did", Set.of(DID, "did:web:another.example.test"));
+    assertThrows(
+        AuthenticationRequiredException.class,
+        () -> KeycloakOrganizationClaims.extract(claims, "my-client"));
+    organization.put("forwardmeasure.tenant-did", "not-a-did");
+    assertThrows(
+        AuthenticationRequiredException.class,
+        () -> KeycloakOrganizationClaims.extract(claims, "my-client"));
   }
 
   @Test

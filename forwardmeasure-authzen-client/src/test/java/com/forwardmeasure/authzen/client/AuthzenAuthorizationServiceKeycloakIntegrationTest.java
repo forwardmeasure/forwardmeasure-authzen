@@ -89,8 +89,10 @@ class AuthzenAuthorizationServiceKeycloakIntegrationTest {
   @BeforeAll
   static void startKeycloakAndProvisionRealAuthorization() {
     fixture = AuthzenKeycloakFixture.start();
-    UUID tenantId = UUID.randomUUID();
-    String organizationId = fixture.provisionTenant("widget-org", tenantId, ROLE);
+    var tenantDid =
+        com.forwardmeasure.jpa.tenancy.Did.parse("did:fwmtest:tenant:" + UUID.randomUUID());
+    UUID tenantId = com.forwardmeasure.jpa.tenancy.TenantId.forDid(tenantDid).value();
+    String organizationId = fixture.provisionTenant("widget-org", tenantDid, ROLE);
     fixture.grantResourceAuthorization(
         organizationId,
         RESOURCE_TYPE,

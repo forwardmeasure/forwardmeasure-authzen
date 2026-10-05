@@ -19,7 +19,6 @@ package com.forwardmeasure.authzen;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import java.util.Set;
 import java.util.UUID;
@@ -27,15 +26,14 @@ import org.junit.jupiter.api.Test;
 
 /** Ported verbatim from forwardmeasure-openworkflow's real {@code ActiveOrganizationTest}. */
 class ActiveOrganizationTest {
-  private static final TenantDatabase DATABASE = TenantDatabase.forAlias("activeorganizationtest");
 
   @Test
   void activeOrganizationIsPartOfTheAuthorizationIdentity() {
     TenantId tenant = new TenantId(UUID.randomUUID());
     ActiveOrganization first =
-        new ActiveOrganization(tenant, DATABASE, "org-a", "actor", Set.of("workflow-author"));
+        new ActiveOrganization(tenant, "org-a", "actor", Set.of("workflow-author"));
     ActiveOrganization second =
-        new ActiveOrganization(tenant, DATABASE, "org-b", "actor", Set.of("workflow-author"));
+        new ActiveOrganization(tenant, "org-b", "actor", Set.of("workflow-author"));
     assertNotEquals(first, second);
   }
 
@@ -43,8 +41,6 @@ class ActiveOrganizationTest {
   void missingActiveOrganizationDataIsRejected() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ActiveOrganization(
-                new TenantId(UUID.randomUUID()), DATABASE, "", "actor", Set.of()));
+        () -> new ActiveOrganization(new TenantId(UUID.randomUUID()), "", "actor", Set.of()));
   }
 }

@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
  * exception's own javadoc for why.
  */
 public final class KeycloakOrganizationClaims {
-  private static final String TENANT_ID_ATTRIBUTE = "forwardmeasure.tenant-id";
+  private static final String TENANT_DID_ATTRIBUTE = "forwardmeasure.tenant-did";
 
   private KeycloakOrganizationClaims() {}
 
@@ -45,19 +45,19 @@ public final class KeycloakOrganizationClaims {
     if (!(id instanceof String organizationId) || organizationId.isBlank()) {
       throw new AuthenticationRequiredException("Active Organization id is required");
     }
-    String tenantId = singletonText(organization.get(TENANT_ID_ATTRIBUTE), TENANT_ID_ATTRIBUTE);
+    String tenantDid = singletonText(organization.get(TENANT_DID_ATTRIBUTE), TENANT_DID_ATTRIBUTE);
     Set<String> organizationRoles =
         organizationRoles(organization.get("resource_access"), clientId);
     try {
       return new ActiveOrganization(
-          com.forwardmeasure.jpa.tenancy.TenantId.parse(tenantId),
-          com.forwardmeasure.jpa.tenancy.TenantDatabase.forAlias(alias),
+          com.forwardmeasure.jpa.tenancy.TenantId.forDid(
+              com.forwardmeasure.jpa.tenancy.Did.parse(tenantDid)),
           organizationId,
           actorId,
           organizationRoles);
     } catch (IllegalArgumentException failure) {
       throw new AuthenticationRequiredException(
-          "Active Organization tenant id or alias is invalid", failure);
+          "Active Organization tenant DID is invalid", failure);
     }
   }
 
