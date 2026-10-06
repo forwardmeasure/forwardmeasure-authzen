@@ -37,6 +37,7 @@ public final class OAuthClientCredentialsTokenSupplier implements BearerTokenSup
   private final String clientSecret;
   private final Duration timeout;
   private final Clock clock;
+  private final String scope;
   private volatile Token cached;
 
   public OAuthClientCredentialsTokenSupplier(
@@ -57,6 +58,30 @@ public final class OAuthClientCredentialsTokenSupplier implements BearerTokenSup
       String clientSecret,
       Duration timeout,
       Clock clock) {
+    this(client, mapper, endpoint, clientId, clientSecret, timeout, clock, null);
+  }
+
+  public OAuthClientCredentialsTokenSupplier(
+      HttpClient client,
+      ObjectMapper mapper,
+      URI endpoint,
+      String clientId,
+      String clientSecret,
+      Duration timeout,
+      String scope) {
+    this(client, mapper, endpoint, clientId, clientSecret, timeout, Clock.systemUTC(), scope);
+  }
+
+  private OAuthClientCredentialsTokenSupplier(
+      HttpClient client,
+      ObjectMapper mapper,
+      URI endpoint,
+      String clientId,
+      String clientSecret,
+      Duration timeout,
+      Clock clock,
+      String scope) {
+    this.scope = scope;
     this.client = Objects.requireNonNull(client, "client");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
@@ -87,7 +112,8 @@ public final class OAuthClientCredentialsTokenSupplier implements BearerTokenSup
         "grant_type=client_credentials&client_id="
             + encode(clientId)
             + "&client_secret="
-            + encode(clientSecret);
+            + encode(clientSecret)
+            + (scope == null ? "" : "&scope=" + encode(scope));
     try {
       HttpResponse<String> response =
           client.send(
