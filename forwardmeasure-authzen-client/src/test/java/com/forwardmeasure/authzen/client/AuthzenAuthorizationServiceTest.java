@@ -59,6 +59,8 @@ class AuthzenAuthorizationServiceTest {
   private final AtomicReference<String> response = new AtomicReference<>("{\"decision\":true}");
   private final AtomicReference<Integer> status = new AtomicReference<>(200);
   private final AtomicReference<JsonNode> requestBody = new AtomicReference<>();
+  private final AtomicReference<String> echoOverride = new AtomicReference<>();
+  private final java.util.List<HttpClient> clients = new java.util.ArrayList<>();
   private HttpServer server;
   private URI baseUri;
 
@@ -74,6 +76,7 @@ class AuthzenAuthorizationServiceTest {
   @AfterEach
   void stopServer() {
     server.stop(0);
+    clients.forEach(HttpClient::close);
   }
 
   @Test
@@ -136,9 +139,114 @@ class AuthzenAuthorizationServiceTest {
     assertEquals("execute_all", requestBody.get().at("/options/evaluations_semantic").textValue());
   }
 
+  @Test
+  void batchesRejectMixedIdentityAndCorrelationBeforeSendingAndRequireEveryBooleanDecision() {
+    var service = service(() -> "token");
+    var first = request("org", Set.of("reader"), "batch-one");
+    assertTrue(service.evaluateBatch(List.of()).isEmpty());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.evaluateBatch(
+                List.of(first, request("another-org", Set.of("reader"), "batch-one"))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.evaluateBatch(
+                List.of(first, request("org", Set.of("reader"), "different-audit"))));
+    assertEquals(0, calls.get());
+    for (String payload :
+        List.of(
+            "{}",
+            "{\"evaluations\":true}",
+            "{\"evaluations\":[]}",
+            "{\"evaluations\":[{\"decision\":true},{}]}",
+            "{\"evaluations\":[{\"decision\":true},{\"decision\":\"true\"}]}")) {
+      response.set(payload);
+      assertThrows(
+          AuthorizationUnavailableException.class,
+          () -> service.evaluateBatch(List.of(first, first)));
+    }
+    response.set(
+        "{\"evaluations\":[{\"decision\":true,\"context\":{\"reason\":\"role\"}},{\"decision\":false}]}");
+    var result = service.evaluateBatch(List.of(first, first));
+    assertTrue(result.getFirst().permitted());
+    assertFalse(result.getLast().permitted());
+    assertEquals("role", result.getFirst().context().get("reason"));
+  }
+
+  @Test
+  void brokenAuditEchoAndMalformedJsonCannotCreateCachedAllowDecisions() {
+    var service = service(() -> "token");
+    var input = request("org", Set.of("reader"), "audit-original");
+    for (String echo : List.of("", "wrong-audit")) {
+      echoOverride.set(echo);
+      assertThrows(AuthorizationUnavailableException.class, () -> service.evaluate(input));
+    }
+    echoOverride.set(null);
+    for (String payload : List.of("{broken", "null", "{}", "{\"decision\":1}")) {
+      response.set(payload);
+      assertThrows(AuthorizationUnavailableException.class, () -> service.evaluate(input));
+    }
+    response.set("{\"decision\":false,\"context\":{\"reason\":\"policy-denied\"}}");
+    var denied = service.evaluate(input);
+    assertFalse(denied.permitted());
+    assertEquals("policy-denied", denied.context().get("reason"));
+    assertFalse(service.evaluate(input).permitted());
+    assertEquals(7, calls.get());
+    assertThrows(
+        AuthorizationUnavailableException.class, () -> service(() -> null).evaluate(input));
+    assertEquals(7, calls.get());
+  }
+
+  @Test
+  void expiredDecisionAndCacheEvictionRequireFreshAuthorization() {
+    var time = new TestClock();
+    var service = service(() -> "token", time, 2);
+    var first = request("org-a", Set.of("reader"), "first");
+    assertTrue(service.evaluate(first).permitted());
+    var sameWithNewAudit = request("org-a", Set.of("reader"), "new-audit");
+    var hit = service.evaluate(sameWithNewAudit);
+    assertEquals("new-audit", hit.correlationId());
+    assertEquals(Boolean.TRUE, hit.context().get("cache"));
+    assertEquals(1, calls.get());
+    time.now = time.now.plusSeconds(30);
+    response.set("{\"decision\":false}");
+    assertFalse(service.evaluate(first).permitted());
+    assertEquals(2, calls.get());
+    service.evaluate(request("org-b", Set.of("reader"), "b"));
+    time.now = time.now.plusSeconds(30);
+    service.evaluate(request("org-c", Set.of("reader"), "c"));
+    service.evaluate(request("org-d", Set.of("reader"), "d"));
+    service.evaluate(request("org-e", Set.of("reader"), "e"));
+    assertFalse(service.evaluate(first).permitted());
+    assertEquals(7, calls.get());
+  }
+
+  @Test
+  void cancellationIsReportedAsUnavailableAndLeavesInterruptSet() {
+    var service = service(() -> "token");
+    var input = request("org", Set.of(), "interrupted");
+    Thread.currentThread().interrupt();
+    try {
+      assertThrows(AuthorizationUnavailableException.class, () -> service.evaluate(input));
+      assertTrue(Thread.currentThread().isInterrupted());
+    } finally {
+      Thread.interrupted();
+    }
+    assertTrue(service.evaluate(input).permitted());
+  }
+
   private AuthzenAuthorizationService service(BearerTokenSupplier tokens) {
+    return service(tokens, java.time.Clock.systemUTC(), 100);
+  }
+
+  private AuthzenAuthorizationService service(
+      BearerTokenSupplier tokens, java.time.Clock clock, int maximumCacheEntries) {
+    var client = HttpClient.newHttpClient();
+    clients.add(client);
     return new AuthzenAuthorizationService(
-        HttpClient.newHttpClient(),
+        client,
         mapper,
         tokens,
         new AuthzenConfiguration(
@@ -146,8 +254,28 @@ class AuthzenAuthorizationServiceTest {
             baseUri.resolve("/evaluations"),
             Duration.ofSeconds(2),
             Duration.ofSeconds(30),
-            100,
-            "test-v1"));
+            maximumCacheEntries,
+            "test-v1"),
+        clock);
+  }
+
+  private static final class TestClock extends java.time.Clock {
+    private java.time.Instant now = java.time.Instant.parse("2026-10-07T00:00:00Z");
+
+    @Override
+    public java.time.ZoneId getZone() {
+      return java.time.ZoneOffset.UTC;
+    }
+
+    @Override
+    public java.time.Clock withZone(java.time.ZoneId zone) {
+      return java.time.Clock.fixed(now, zone);
+    }
+
+    @Override
+    public java.time.Instant instant() {
+      return now;
+    }
   }
 
   private AuthorizationRequest request(
@@ -186,7 +314,8 @@ class AuthzenAuthorizationServiceTest {
     requestBody.set(mapper.readTree(exchange.getRequestBody()));
     String correlation = exchange.getRequestHeaders().getFirst("X-Request-ID");
     exchange.getResponseHeaders().add("Content-Type", "application/json");
-    exchange.getResponseHeaders().add("X-Request-ID", correlation);
+    String echo = echoOverride.get() == null ? correlation : echoOverride.get();
+    if (!echo.isEmpty()) exchange.getResponseHeaders().add("X-Request-ID", echo);
     byte[] bytes = response.get().getBytes(StandardCharsets.UTF_8);
     exchange.sendResponseHeaders(status.get(), bytes.length);
     exchange.getResponseBody().write(bytes);

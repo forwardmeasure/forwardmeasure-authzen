@@ -60,6 +60,7 @@
   </licenses>
 
   <properties>
+    <!-- Project release identity is local for Maven CI-friendly reactor parent resolution. -->
     <revision>1.1.0</revision>
     <!-- forwardmeasure.jpa.version is not redeclared here - already a real, inherited property
          from our own parent, forwardmeasure-platform (confirmed by reading that pom directly, not

@@ -164,4 +164,59 @@ class KeycloakOrganizationClaimsTest {
         AuthenticationRequiredException.class,
         () -> KeycloakOrganizationClaims.extract(Map.of(), "my-client"));
   }
+
+  @Test
+  void malformedIdentityCannotEstablishTenantRouting() {
+    for (Object subject : java.util.List.of(42, " ")) {
+      assertThrows(
+          AuthenticationRequiredException.class,
+          () -> KeycloakOrganizationClaims.extract(Map.of("sub", subject), "my-client"));
+    }
+    for (Object organization :
+        java.util.List.of(
+            "invalid",
+            Map.of(42, Map.of()),
+            Map.of(" ", Map.of()),
+            Map.of("alias", "invalid"),
+            Map.of("alias", Map.of("id", 42)),
+            Map.of("alias", Map.of("id", " ")))) {
+      assertThrows(
+          AuthenticationRequiredException.class,
+          () ->
+              KeycloakOrganizationClaims.extract(
+                  Map.of("sub", "actor", "organization", organization), "my-client"));
+    }
+  }
+
+  @Test
+  void malformedTenantAttributesAndNonTextRolesAreRejected() {
+    for (Object did : java.util.List.of(" ", 42, java.util.List.of(), java.util.List.of(42))) {
+      var claims =
+          Map.<String, Object>of(
+              "sub",
+              "actor",
+              "organization",
+              Map.of("alias", Map.of("id", ORGANIZATION_ID, "forwardmeasure.tenant-did", did)));
+      assertThrows(
+          AuthenticationRequiredException.class,
+          () -> KeycloakOrganizationClaims.extract(claims, "my-client"));
+    }
+    var claims =
+        Map.<String, Object>of(
+            "sub",
+            "actor",
+            "organization",
+            Map.of(
+                "alias",
+                Map.of(
+                    "id",
+                    ORGANIZATION_ID,
+                    "forwardmeasure.tenant-did",
+                    DID,
+                    "resource_access",
+                    Map.of("my-client", Map.of("roles", java.util.List.of(42))))));
+    assertThrows(
+        AuthenticationRequiredException.class,
+        () -> KeycloakOrganizationClaims.extract(claims, "my-client"));
+  }
 }
