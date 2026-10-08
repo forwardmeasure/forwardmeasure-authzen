@@ -193,6 +193,38 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
     mapRoleOntoOrganizationGroup(organizationId, groupId, roleName);
   }
 
+  /** Adds a real access-token audience mapper to one client, without changing other clients. */
+  public void grantTokenAudience(String clientId, String audience) {
+    if (audience == null || audience.isBlank()) {
+      throw new IllegalArgumentException("audience must not be blank");
+    }
+    URI mappers =
+        adminBase().resolve("clients/" + clientUuidOf(clientId) + "/protocol-mappers/models");
+    String name = "fixture-audience-" + audience;
+    for (JsonNode existing : send("GET", mappers, null, 200).body()) {
+      if (name.equals(existing.path("name").asText())) return;
+    }
+    send(
+        "POST",
+        mappers,
+        Map.of(
+            "name",
+            name,
+            "protocol",
+            "openid-connect",
+            "protocolMapper",
+            "oidc-audience-mapper",
+            "config",
+            Map.of(
+                "included.custom.audience",
+                audience,
+                "access.token.claim",
+                "true",
+                "id.token.claim",
+                "false")),
+        201);
+  }
+
   public String clientCredentialsToken(String clientId, String clientSecret) {
     return container.clientCredentialsToken(clientId, clientSecret);
   }

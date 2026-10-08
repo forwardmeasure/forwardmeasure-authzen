@@ -47,6 +47,24 @@ class AuthzenFixtureIntegrationTest {
 
   @Test
   @Timeout(120)
+  void audienceMappersAreIdempotentAndScopedToTheirClient() throws Exception {
+    try (var fixture = AuthzenKeycloakFixture.start()) {
+      fixture.createServiceAccountClient("audience-worker", "test-secret");
+      fixture.createServiceAccountClient("other-worker", "test-secret");
+      fixture.grantTokenAudience("audience-worker", "fixture-api");
+      fixture.grantTokenAudience("audience-worker", "fixture-api");
+      fixture.grantTokenAudience("audience-worker", "fixture-admin-api");
+      var tokenClaims = claims(fixture.clientCredentialsToken("audience-worker", "test-secret"));
+      assertEquals(
+          Set.of("fixture-api", "fixture-admin-api"),
+          new java.util.HashSet<>((List<?>) tokenClaims.get("aud")));
+      var otherClaims = claims(fixture.clientCredentialsToken("other-worker", "test-secret"));
+      org.junit.jupiter.api.Assertions.assertNull(otherClaims.get("aud"));
+    }
+  }
+
+  @Test
+  @Timeout(120)
   void realOrganizationMembershipSeparatesUserReviewerAndWorkerPermissions() throws Exception {
     try (var fixture = AuthzenKeycloakFixture.start();
         var http = HttpClient.newHttpClient()) {
