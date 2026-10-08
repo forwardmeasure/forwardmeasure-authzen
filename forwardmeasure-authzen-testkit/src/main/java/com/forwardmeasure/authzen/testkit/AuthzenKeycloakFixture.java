@@ -91,6 +91,7 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
   private volatile long adminTokenExpiresAtNanos;
   private volatile String clientUuid;
   private volatile String authzenClientUuid;
+  private boolean resourceServerReady;
 
   private AuthzenKeycloakFixture(KeycloakTestContainer container) {
     this.container = container;
@@ -352,6 +353,7 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
       String permissionName,
       String roleName,
       Set<String> actionScopes) {
+    ensureResourceServerStrategy();
     ensureAuthzenClientRole(roleName);
     mapAuthzenRoleOntoOrganizationGroup(organizationId, roleName);
     for (String scope : actionScopes) {
@@ -360,6 +362,21 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
     String keycloakResourceId = ensureResource(resourceType, resourceId, actionScopes);
     String policyId = ensureOrganizationRolePolicy(roleName);
     ensureScopePermission(permissionName, keycloakResourceId, actionScopes, policyId);
+  }
+
+  private synchronized void ensureResourceServerStrategy() {
+    if (resourceServerReady) return;
+    URI resourceServer =
+        adminBase().resolve("clients/" + authzenClientUuid() + "/authz/resource-server");
+    JsonNode settings = send("GET", URI.create(resourceServer + "/settings"), null, 200).body();
+    if (!(settings instanceof com.fasterxml.jackson.databind.node.ObjectNode object)) {
+      throw new IllegalStateException("Keycloak resource server settings must be an object");
+    }
+    // Production provisioning uses one granting permission per role. Keycloak's default
+    // UNANIMOUS strategy would require all roles whenever their permitted scopes overlap.
+    object.put("decisionStrategy", "AFFIRMATIVE");
+    send("PUT", resourceServer, object, 200, 204);
+    resourceServerReady = true;
   }
 
   private void ensureAuthzenClientRole(String roleName) {

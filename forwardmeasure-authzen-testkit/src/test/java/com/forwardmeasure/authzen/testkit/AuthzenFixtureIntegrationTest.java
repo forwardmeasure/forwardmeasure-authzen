@@ -103,9 +103,10 @@ class AuthzenFixtureIntegrationTest {
           "population/one",
           "worker-write-one",
           "worker",
-          Set.of("fixture:write"));
+          Set.of("fixture:read", "fixture:write"));
       assertTrue(decision(fixture, http, worker, "fixture:write"));
-      assertFalse(decision(fixture, http, worker, "fixture:read"));
+      // Either organization role may grant read; a reader must not also need the worker role.
+      assertTrue(decision(fixture, http, worker, "fixture:read"));
       assertFalse(decision(fixture, http, user, "fixture:write"));
       assertTrue(decision(fixture, http, user, "fixture:read"));
       assertThrows(
