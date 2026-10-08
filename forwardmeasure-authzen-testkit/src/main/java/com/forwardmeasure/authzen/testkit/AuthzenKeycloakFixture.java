@@ -253,6 +253,11 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
     return container.passwordToken(CLIENT_ID, USERNAME, PASSWORD);
   }
 
+  /** Real same-key JWT with a different issuer, for HTTP issuer-rejection contracts. */
+  public String mintUserTokenWithAlternateIssuer() {
+    return container.passwordTokenWithAlternateIssuer(CLIENT_ID, USERNAME, PASSWORD);
+  }
+
   /**
    * Adds {@value #AUTHZEN_CLIENT_ID}'s own real Keycloak service-account user (confidential clients
    * with {@code serviceAccountsEnabled: true}, which this fixture's own realm already declares for
