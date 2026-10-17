@@ -369,6 +369,83 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
     ensureScopePermission(permissionName, keycloakResourceId, actionScopes, policyId);
   }
 
+  /**
+   * Grants a role only when the trusted evaluation context matches every exact value. Uses real
+   * Keycloak regex policies with targetContextAttributes plus a unanimous scope permission: the
+   * organization-role policy and all context policies must grant. Resource properties are merged
+   * into that context by Keycloak AuthZEN; no Java-side decision stub is involved.
+   */
+  public void grantResourceAuthorizationWithContext(
+      String organizationId,
+      String resourceType,
+      String resourceId,
+      String permissionName,
+      String roleName,
+      Set<String> actionScopes,
+      Map<String, String> exactContext) {
+    if (exactContext.isEmpty())
+      throw new IllegalArgumentException("A context condition is required");
+    ensureResourceServerStrategy();
+    ensureAuthzenClientRole(roleName);
+    mapAuthzenRoleOntoOrganizationGroup(organizationId, roleName);
+    actionScopes.forEach(this::ensureAuthzenScope);
+    String resource = ensureResource(resourceType, resourceId, actionScopes);
+    var policies = new java.util.ArrayList<String>();
+    policies.add(ensureOrganizationRolePolicy(roleName));
+    exactContext.forEach(
+        (claim, value) -> {
+          if (claim == null || claim.isBlank() || value == null)
+            throw new IllegalArgumentException(
+                "Context condition requires a claim and exact value");
+          String name = permissionName + "-context-" + claim;
+          send(
+              "POST",
+              adminBase()
+                  .resolve(
+                      "clients/" + authzenClientUuid() + "/authz/resource-server/policy/regex"),
+              Map.of(
+                  "name",
+                  name,
+                  "targetClaim",
+                  claim,
+                  "targetContextAttributes",
+                  true,
+                  "pattern",
+                  java.util.regex.Pattern.quote(value),
+                  "logic",
+                  "POSITIVE"),
+              201,
+              204,
+              409);
+          String id = authorizationPolicyId(name);
+          send(
+              "PUT",
+              adminBase()
+                  .resolve(
+                      "clients/"
+                          + authzenClientUuid()
+                          + "/authz/resource-server/policy/regex/"
+                          + id),
+              Map.of(
+                  "id",
+                  id,
+                  "name",
+                  name,
+                  "targetClaim",
+                  claim,
+                  "targetContextAttributes",
+                  true,
+                  "pattern",
+                  java.util.regex.Pattern.quote(value),
+                  "logic",
+                  "POSITIVE"),
+              201,
+              204);
+          policies.add(id);
+        });
+    ensureScopePermission(permissionName, resource, actionScopes, policies, "UNANIMOUS");
+  }
+
   private synchronized void ensureResourceServerStrategy() {
     if (resourceServerReady) return;
     URI resourceServer =
@@ -458,6 +535,10 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
         201,
         204,
         409);
+    return authorizationPolicyId(policyName);
+  }
+
+  private String authorizationPolicyId(String policyName) {
     JsonNode policies =
         send(
                 "GET",
@@ -477,7 +558,7 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
       }
     }
     throw new IllegalStateException(
-        "Keycloak did not return the created organization-role policy " + policyName);
+        "Keycloak did not return the created authorization policy " + policyName);
   }
 
   private void ensureAuthzenScope(String scopeName) {
@@ -549,6 +630,16 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
 
   private void ensureScopePermission(
       String permissionName, String resourceId, Set<String> actionScopes, String policyId) {
+    ensureScopePermission(
+        permissionName, resourceId, actionScopes, List.of(policyId), "AFFIRMATIVE");
+  }
+
+  private void ensureScopePermission(
+      String permissionName,
+      String resourceId,
+      Set<String> actionScopes,
+      List<String> policyIds,
+      String decisionStrategy) {
     List<String> scopeIds = actionScopes.stream().map(this::authzenScopeId).toList();
     send(
         "POST",
@@ -562,9 +653,9 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
             "scopes",
             scopeIds,
             "policies",
-            List.of(policyId),
+            policyIds,
             "decisionStrategy",
-            "AFFIRMATIVE"),
+            decisionStrategy),
         201,
         204,
         409);

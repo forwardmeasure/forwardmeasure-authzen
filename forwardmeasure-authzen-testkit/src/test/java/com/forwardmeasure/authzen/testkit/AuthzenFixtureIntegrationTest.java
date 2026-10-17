@@ -47,6 +47,89 @@ class AuthzenFixtureIntegrationTest {
 
   @Test
   @Timeout(120)
+  void contextConstrainedGrantsRequireTheOrganizationRoleAndEveryExactResourceAttribute()
+      throws Exception {
+    try (var fixture = AuthzenKeycloakFixture.start();
+        var http = HttpClient.newHttpClient()) {
+      String org =
+          fixture.provisionTenant(
+              "context-grants", Did.parse("did:fwmtest:tenant:context-grants"), "scoped-reader");
+      var user = actor(fixture.mintUserToken());
+      fixture.grantResourceAuthorizationWithContext(
+          org,
+          "fixture-resource",
+          "population/one",
+          "one-investigation",
+          "scoped-reader",
+          Set.of("fixture:read"),
+          Map.of("investigation_id", "case.one+two", "visibility", "retained"));
+      assertTrue(
+          decision(
+              fixture,
+              http,
+              user,
+              "fixture:read",
+              Map.of("investigation_id", "case.one+two", "visibility", "retained")));
+      assertFalse(
+          decision(
+              fixture,
+              http,
+              user,
+              "fixture:read",
+              Map.of("investigation_id", "different", "visibility", "retained")));
+      assertFalse(
+          decision(
+              fixture,
+              http,
+              user,
+              "fixture:read",
+              Map.of("investigation_id", "caseXoneetwo", "visibility", "retained")));
+      assertFalse(
+          decision(
+              fixture, http, user, "fixture:read", Map.of("investigation_id", "case.one+two")));
+      assertFalse(decision(fixture, http, user, "fixture:read", Map.of()));
+      fixture.createServiceAccountClient("ungranted-context-reader", "synthetic-context-reader");
+      fixture.grantOrganizationClientRole(org, "no-context-permission");
+      fixture.addServiceAccountToOrganization(
+          org, "ungranted-context-reader", "no-context-permission");
+      var other =
+          actor(
+              fixture.clientCredentialsToken(
+                  "ungranted-context-reader", "synthetic-context-reader"));
+      assertFalse(
+          decision(
+              fixture,
+              http,
+              other,
+              "fixture:read",
+              Map.of("investigation_id", "case.one+two", "visibility", "retained")));
+      fixture.grantResourceAuthorizationWithContext(
+          org,
+          "fixture-resource",
+          "population/one",
+          "one-investigation",
+          "scoped-reader",
+          Set.of("fixture:read"),
+          Map.of("investigation_id", "replacement", "visibility", "retained"));
+      assertFalse(
+          decision(
+              fixture,
+              http,
+              user,
+              "fixture:read",
+              Map.of("investigation_id", "case.one+two", "visibility", "retained")));
+      assertTrue(
+          decision(
+              fixture,
+              http,
+              user,
+              "fixture:read",
+              Map.of("investigation_id", "replacement", "visibility", "retained")));
+    }
+  }
+
+  @Test
+  @Timeout(120)
   void audienceMappersAreIdempotentAndScopedToTheirClient() throws Exception {
     try (var fixture = AuthzenKeycloakFixture.start()) {
       fixture.createServiceAccountClient("audience-worker", "test-secret");
@@ -343,6 +426,16 @@ class AuthzenFixtureIntegrationTest {
   static boolean decision(
       AuthzenKeycloakFixture fixture, HttpClient http, ActiveOrganization actor, String action)
       throws Exception {
+    return decision(fixture, http, actor, action, Map.of("tenant_id", actor.tenantId().toString()));
+  }
+
+  static boolean decision(
+      AuthzenKeycloakFixture fixture,
+      HttpClient http,
+      ActiveOrganization actor,
+      String action,
+      Map<String, String> resourceProperties)
+      throws Exception {
     var properties =
         Map.of(
             "organization_id",
@@ -366,7 +459,7 @@ class AuthzenFixtureIntegrationTest {
                 "id",
                 "population/one",
                 "properties",
-                Map.of("tenant_id", actor.tenantId().toString())),
+                resourceProperties),
             "action",
             Map.of("name", action),
             "context",
