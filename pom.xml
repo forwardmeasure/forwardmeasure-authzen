@@ -75,6 +75,15 @@
 
   <dependencyManagement>
     <dependencies>
+            <!-- No framework module in this repo: every module is framework-neutral and takes its
+                 third-party versions from the platform libraries BOM. -->
+            <dependency>
+                <groupId>com.forwardmeasure.platform</groupId>
+                <artifactId>forwardmeasure-platform-libraries-bom</artifactId>
+                <version>${forwardmeasure.platform.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
       <!-- forwardmeasure-jpa-tenancy (ActiveOrganization's own TenantId) has no version managed
            by forwardmeasure-platform, unlike this repo's own artifacts below - real BOM import,
            mirroring forwardmeasure-openworkflow's own root pom exactly (confirmed by reading it,
@@ -101,17 +110,17 @@
         <scope>import</scope>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.authzen</groupId>
         <artifactId>forwardmeasure-authzen-api</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.authzen</groupId>
         <artifactId>forwardmeasure-authzen-client</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.authzen</groupId>
         <artifactId>forwardmeasure-authzen-testkit</artifactId>
         <version>${project.version}</version>
       </dependency>
