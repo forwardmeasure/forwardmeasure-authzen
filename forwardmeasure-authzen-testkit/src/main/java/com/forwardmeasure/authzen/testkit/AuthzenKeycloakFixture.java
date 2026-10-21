@@ -29,6 +29,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -228,6 +229,20 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
 
   public String clientCredentialsToken(String clientId, String clientSecret) {
     return container.clientCredentialsToken(clientId, clientSecret);
+  }
+
+  /**
+   * Provisions one Organization (with the {@code forwardmeasure.tenant-did} attribute {@code
+   * KeycloakOrganizationClaims} reads) and nothing else - in particular, {@value #USERNAME} is
+   * <em>not</em> made a member, so that user's tokens keep a single active Organization. For a
+   * second tenant whose only members are service accounts (added with {@link
+   * #addServiceAccountToOrganization}), e.g. to prove a product refuses another tenant's token.
+   *
+   * @return the new Organization's id
+   */
+  public String provisionOrganization(
+      String organizationAlias, com.forwardmeasure.jpa.tenancy.Did tenantDid) {
+    return createOrganization(organizationAlias, tenantDid);
   }
 
   /**
@@ -622,10 +637,56 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
             .body();
     for (JsonNode resource : resources) {
       if (resourceId.equals(resource.path("name").asText())) {
-        return requiredText(resource, "_id");
+        String keycloakResourceId = requiredText(resource, "_id");
+        mergeResourceScopes(keycloakResourceId, resourceType, resourceId, actionScopes);
+        return keycloakResourceId;
       }
     }
     throw new IllegalStateException("Keycloak did not return the created resource " + resourceId);
+  }
+
+  /**
+   * Resources are shared by name (one per resource type and id), so a later grant on an existing
+   * resource may need scopes its first grant did not register. Keycloak 26.8 rejects a scope
+   * permission whose scopes are not on its resource, so the resource's scope set is widened to the
+   * union before any permission refers to it. The PUT replaces the scope set by name.
+   */
+  private void mergeResourceScopes(
+      String keycloakResourceId, String resourceType, String resourceId, Set<String> actionScopes) {
+    URI resourceUri =
+        adminBase()
+            .resolve(
+                "clients/"
+                    + authzenClientUuid()
+                    + "/authz/resource-server/resource/"
+                    + keycloakResourceId);
+    JsonNode existing = send("GET", URI.create(resourceUri + "/scopes"), null, 200).body();
+    Set<String> merged = new LinkedHashSet<>();
+    for (JsonNode scope : existing) {
+      merged.add(scope.path("name").asText());
+    }
+    if (merged.containsAll(actionScopes)) {
+      return;
+    }
+    merged.addAll(actionScopes);
+    send(
+        "PUT",
+        resourceUri,
+        Map.of(
+            "_id",
+            keycloakResourceId,
+            "name",
+            resourceId,
+            "type",
+            resourceType,
+            "uris",
+            List.of(),
+            "scopes",
+            merged.stream().map(scope -> Map.of("name", scope)).toList(),
+            "ownerManagedAccess",
+            false),
+        200,
+        204);
   }
 
   private void ensureScopePermission(
