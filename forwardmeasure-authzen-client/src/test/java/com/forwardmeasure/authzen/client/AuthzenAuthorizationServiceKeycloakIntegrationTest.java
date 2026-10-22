@@ -150,6 +150,30 @@ class AuthzenAuthorizationServiceKeycloakIntegrationTest {
     assertFalse(decision.permitted(), "a scope never granted to this role must be denied");
   }
 
+  /**
+   * A subject Keycloak cannot resolve to a user (here an actor DID, which is not a Keycloak user
+   * id) is denied - never a server error. Keycloak hands the policies an identity whose getId()
+   * throws for such a subject; the organization-role policy provider must treat that as unknown.
+   */
+  @Test
+  void deniesASubjectKeycloakCannotResolveInsteadOfFailing() {
+    ActiveOrganization unresolvable =
+        new ActiveOrganization(
+            actor.tenantId(),
+            actor.organizationId(),
+            "did:web:platform.example:actors:unknown-provider:nobody",
+            actor.organizationRoles());
+    AuthorizationDecision decision =
+        authorization.evaluate(
+            new AuthorizationRequest(
+                unresolvable,
+                new AuthorizationResource(RESOURCE_TYPE, RESOURCE_ID, Map.of()),
+                GRANTED_SCOPE,
+                "correlation-unresolvable",
+                Map.of()));
+    assertFalse(decision.permitted(), "a subject that is no Keycloak user must be denied");
+  }
+
   @Test
   void requireAuthorizedPassesForAGrantedActionAndThrowsForAnUngrantedOne() {
     authorization.requireAuthorized(
