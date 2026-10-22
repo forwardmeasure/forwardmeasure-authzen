@@ -231,6 +231,153 @@ public final class AuthzenKeycloakFixture implements AutoCloseable {
     return container.clientCredentialsToken(clientId, clientSecret);
   }
 
+  /** Keycloak's base URI (scheme, host and port), host-reachable: where Admin REST is served. */
+  public URI serverUri() {
+    return URI.create(baseUrl());
+  }
+
+  /**
+   * Creates a confidential, service-account-only client that may only read users and Organizations:
+   * its service-account user holds exactly the realm-management client roles {@code view-users} and
+   * {@code view-organizations}, and nothing else - no Organization scope, no Organization
+   * membership, no other realm-management role. The read-only Admin REST identity a service uses to
+   * read live Organization membership (never the master realm's administrator). Idempotent.
+   */
+  public void createReadOnlyMembershipClient(String clientId, String clientSecret) {
+    send(
+        "POST",
+        adminBase().resolve("clients"),
+        Map.of(
+            "clientId",
+            clientId,
+            "secret",
+            clientSecret,
+            "protocol",
+            "openid-connect",
+            "publicClient",
+            false,
+            "standardFlowEnabled",
+            false,
+            "directAccessGrantsEnabled",
+            false,
+            "serviceAccountsEnabled",
+            true,
+            "clientAuthenticatorType",
+            "client-secret"),
+        201,
+        409);
+    String serviceAccountUserId =
+        requiredText(
+            send(
+                    "GET",
+                    adminBase()
+                        .resolve("clients/" + clientUuidOf(clientId) + "/service-account-user"),
+                    null,
+                    200)
+                .body(),
+            "id");
+    String realmManagement = clientUuidOf("realm-management");
+    List<JsonNode> roles =
+        List.of(
+            send(
+                    "GET",
+                    adminBase().resolve("clients/" + realmManagement + "/roles/view-users"),
+                    null,
+                    200)
+                .body(),
+            send(
+                    "GET",
+                    adminBase().resolve("clients/" + realmManagement + "/roles/view-organizations"),
+                    null,
+                    200)
+                .body());
+    send(
+        "POST",
+        adminBase()
+            .resolve("users/" + serviceAccountUserId + "/role-mappings/clients/" + realmManagement),
+        roles,
+        204);
+  }
+
+  /**
+   * Creates an enabled person who can sign in with {@code password} (direct grant on {@value
+   * #CLIENT_ID}) and is a member of no Organization yet. Idempotent by username.
+   *
+   * @return the user's id - the {@code sub} of their tokens
+   */
+  public String createUser(
+      String username, String email, String firstName, String lastName, String password) {
+    send(
+        "POST",
+        adminBase().resolve("users"),
+        Map.of(
+            "username",
+            username,
+            "enabled",
+            true,
+            "email",
+            email,
+            "emailVerified",
+            true,
+            "firstName",
+            firstName,
+            "lastName",
+            lastName,
+            "requiredActions",
+            List.of(),
+            "credentials",
+            List.of(Map.of("type", "password", "value", password, "temporary", false))),
+        201,
+        409);
+    return userIdOf(username);
+  }
+
+  /** Enables or disables the user {@code userId}'s account (a disabled account cannot sign in). */
+  public void setUserEnabled(String userId, boolean enabled) {
+    JsonNode user = send("GET", adminBase().resolve("users/" + userId), null, 200).body();
+    if (!(user instanceof com.fasterxml.jackson.databind.node.ObjectNode object)) {
+      throw new IllegalStateException("Keycloak user representation must be an object");
+    }
+    object.put("enabled", enabled);
+    send("PUT", adminBase().resolve("users/" + userId), object, 204);
+  }
+
+  /**
+   * Makes the user {@code userId} a member of {@code organizationId} and of each of its {@code
+   * groupNames} Organization groups (each created if missing; a group gets no role here - {@link
+   * #grantOrganizationClientRole} maps one). Idempotent.
+   */
+  public void addUserToOrganization(String organizationId, String userId, String... groupNames) {
+    addOrganizationMember(organizationId, userId);
+    for (String groupName : groupNames) {
+      addOrganizationGroupMember(
+          organizationId, createOrganizationGroup(organizationId, groupName), userId);
+    }
+  }
+
+  /** A fresh access token for {@code username}, signed in with {@code password}. */
+  public String passwordToken(String username, String password) {
+    return container.passwordToken(CLIENT_ID, username, password);
+  }
+
+  private String userIdOf(String username) {
+    String query = URLEncoder.encode(username, StandardCharsets.UTF_8);
+    JsonNode users =
+        send(
+                "GET",
+                URI.create(
+                    adminBase().resolve("users").toString() + "?username=" + query + "&exact=true"),
+                null,
+                200)
+            .body();
+    for (JsonNode user : users) {
+      if (username.equals(user.path("username").asText())) {
+        return requiredText(user, "id");
+      }
+    }
+    throw new IllegalStateException("Keycloak user " + username + " was not found");
+  }
+
   /**
    * Provisions one Organization (with the {@code forwardmeasure.tenant-did} attribute {@code
    * KeycloakOrganizationClaims} reads) and nothing else - in particular, {@value #USERNAME} is
